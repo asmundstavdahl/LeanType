@@ -512,7 +512,12 @@ class ProofreadService(private val context: Context) {
                 put("model", modelName)
                 put("messages", messagesArray)
                 put("temperature", 0.1)
-                put("max_tokens", 512)
+                // Reasoning models (e.g. deepseek-v4-flash, kimi) emit a long
+                // reasoning_content BEFORE the actual answer. A small max_tokens
+                // budget gets consumed entirely by reasoning, leaving the final
+                // content empty (finish_reason="length" -> "Empty response from API").
+                // Use a large budget so the answer always has room to be generated.
+                put("max_tokens", 8192)
             }
 
             OutputStreamWriter(connection.outputStream).use { writer ->
@@ -602,7 +607,22 @@ class ProofreadService(private val context: Context) {
                 if (content.isNotBlank()) {
                     Result.success(content.trim())
                 } else {
-                    Result.failure(ProofreadException("Empty response from API"))
+                    // Empty content: for reasoning models this usually means the
+                    // model consumed its whole token budget on reasoning_content.
+                    val reasoning = message?.optString("reasoning_content", "")?.takeIf { it.isNotBlank() }
+                        ?: message?.optString("reasoning", "")
+                    val finishReason = firstChoice.optString("finish_reason", "")
+                    val hint = when {
+                        finishReason == "length" && !reasoning.isNullOrBlank() ->
+                            "Empty response from API (reasoning used the whole token budget, try again or use a model without thinking mode)"
+                        finishReason == "length" ->
+                            "Empty response from API (max_tokens reached)"
+                        !reasoning.isNullOrBlank() ->
+                            "Empty response from API (model only produced reasoning)"
+                        else ->
+                            "Empty response from API"
+                    }
+                    Result.failure(ProofreadException(hint))
                 }
             } else {
                 Result.failure(ProofreadException("Invalid API response format"))
