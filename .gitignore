@@ -86,3 +86,6 @@ docs/superpowers/
 
 # Temporary generated files
 docs/releasenote/release_notes_temp.md
+
+# Byggeartefakter (APK bygges lokalt, 23 MB)
+*.apk
